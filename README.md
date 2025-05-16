@@ -5,6 +5,8 @@ This package allows macOS Finder to display thumbnails, static previews, cover a
 
 QuickLook and Spotlight understand a limited number of media files - mostly only MPEG audio and video codecs within MPEG container files. This package adds support for wide range of other codecs and "non-native" media file types, including `.asf`, `.avi`, `.flv`, `.mkv`, `.rm`, `.webm`, `.wmf` etc.
 
+When the Quick Look panel is opened with the Space bar the previewer uses FFmpeg's `h264_videotoolbox` encoder to quickly remux the source file to an MP4 for smooth playback. Only the first video and audio tracks are kept and all other metadata is ignored. If the conversion doesn't finish within two seconds, the previewer falls back to generating snapshots.
+
 <img src="img/finder.jpeg" alt="Finder" width="508"/> &nbsp; <img src="img/info.jpeg" alt="Finder Info" width="267"/>
 <img src="img/preview.jpeg" alt="QuickLook preview" width="962"/>
 

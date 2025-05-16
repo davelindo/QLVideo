@@ -10,7 +10,7 @@ import WebKit
 import AVKit
 
 @discardableResult
-fileprivate func runHelper(_ exe: String, args: [String]) throws -> String {
+fileprivate func runHelper(_ exe: String, args: [String], timeout: TimeInterval? = nil) throws -> String {
     let task = Process()
     do {
         task.executableURL = URL(fileURLWithPath: exe)
@@ -18,6 +18,15 @@ fileprivate func runHelper(_ exe: String, args: [String]) throws -> String {
         task.standardOutput = Pipe()
         task.standardError = Pipe()
         try task.run()
+
+        if let timeout = timeout {
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if task.isRunning {
+                    task.terminate()
+                }
+            }
+        }
+
         task.waitUntilExit()
     } catch {
         throw NSError(domain: "uk.org.marginal.qlvideo", code: -1,
@@ -183,8 +192,19 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
 
-        var args = ["-nostdin", "-i", src.path, "-c:v", "copy", "-c:a", "copy",
-                    "-movflags", "+faststart", tmp.path]
+        var args = ["-nostdin",
+                    "-analyzeduration", "0",
+                    "-probesize", "32k",
+                    "-i", src.path,
+                    "-map", "0:v:0",
+                    "-map", "0:a:0",
+                    "-sn", "-dn",
+                    "-map_metadata", "-1",
+                    "-c:v", "h264_videotoolbox",
+                    "-c:a", "aac",
+                    "-movflags", "+faststart",
+                    "-f", "mp4",
+                    tmp.path]
 
 #if DEBUG
         args.insert(contentsOf: ["-loglevel", "info"], at: 0)
@@ -193,15 +213,21 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
 #endif
 
         do {
-            try runHelper(ffmpeg, args: args)
+            try runHelper(ffmpeg, args: args, timeout: 2.0)
         } catch {
+            return false
+        }
+
+        guard FileManager.default.fileExists(atPath: tmp.path) else {
             return false
         }
 
         DispatchQueue.main.async {
             self.setupPreview(.player)
-            self.playerView.player = AVPlayer(url: tmp)
+            let player = AVPlayer(url: tmp)
+            self.playerView.player = player
             self.preferredContentSize = self.snapshotSize
+            player.play()
         }
         return true
     }
@@ -245,13 +271,11 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
         }
         snapshotSize = snapshotter.previewSize
         let videoCodec = snapshotter.videoCodec
-        let audioCodec = snapshotter.audioCodec
 
-        if let vcodec = videoCodec?.lowercased(),
-           ["h264", "hevc", "prores"].contains(vcodec),
-           let acodec = audioCodec?.lowercased(),
-           ["aac", "pcm_s16le", "pcm_s24le", "pcm_f32le", "alac"].contains(acodec),
-           url.pathExtension.lowercased() != "mp4" && url.pathExtension.lowercased() != "mov" {
+        // When displaying a full Quick Look preview (e.g. via Space bar),
+        // attempt to remux the source file to a temporary MP4 for playback.
+        if view.frame.width >= kWindowWidthThreshhold &&
+            view.frame.height >= kWindowHeightThreshhold {
             if (try? remuxAndPlay(url)) == true {
                 return
             }

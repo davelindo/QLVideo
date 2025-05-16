@@ -7,6 +7,34 @@
 
 import QuickLookUI
 import WebKit
+import AVKit
+
+@discardableResult
+fileprivate func runHelper(_ exe: String, args: [String]) throws -> String {
+    let task = Process()
+    do {
+        task.executableURL = URL(fileURLWithPath: exe)
+        task.arguments = args
+        task.standardOutput = Pipe()
+        task.standardError = Pipe()
+        try task.run()
+        task.waitUntilExit()
+    } catch {
+        throw NSError(domain: "uk.org.marginal.qlvideo", code: -1,
+                      userInfo: [NSLocalizedFailureReasonErrorKey: "\(error)"])
+    }
+
+    let stdout = String(data: (task.standardOutput as! Pipe).fileHandleForReading.readDataToEndOfFile(),
+                        encoding: .utf8) ?? ""
+    let stderr = String(data: (task.standardError as! Pipe).fileHandleForReading.readDataToEndOfFile(),
+                        encoding: .utf8) ?? ""
+    if task.terminationStatus != 0 {
+        throw NSError(domain: "uk.org.marginal.qlvideo", code: Int(task.terminationStatus),
+                      userInfo: [NSLocalizedFailureReasonErrorKey: stderr])
+    }
+
+    return stdout + stderr
+}
 
 // Settings
 let kSettingsSnapshotTime = "SnapshotTime"  // Seek offset for thumbnails and single Previews [s].
@@ -20,7 +48,7 @@ let kMinimumPeriod = 60  // Don't create snapshots spaced more closely than this
 let kWindowWidthThreshhold: CGFloat = 600  // Finder Column view max width = 560
 let kWindowHeightThreshhold: CGFloat = 160  // Get Info height = 128, QuickLook minimum window height = 180
 
-enum PreviewType { case snapshot, webView, contactSheet }
+enum PreviewType { case snapshot, webView, contactSheet, player }
 
 // Window title helper
 func displayname(title: String, size: CGSize, duration: Int, channels: Int) -> String {
@@ -75,6 +103,7 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
     @IBOutlet weak var sidebarCollection: NSCollectionView!
     @IBOutlet weak var snapshot: NSImageView!
     @IBOutlet weak var webView: WKWebView!
+    var playerView: AVPlayerView!
 
     override var nibName: NSNib.Name? {
         return NSNib.Name("PreviewViewController")
@@ -87,6 +116,10 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
         snapshot.layer!.backgroundColor = .black  // CoreMedia previewer does this in Finder's Column & Gallery views
         sidebarCollection.backgroundColors = [.clear]
         sidebarCollection.register(NSNib(nibNamed: "SidebarItem", bundle: nil), forItemWithIdentifier: SidebarItem.identifier)
+        playerView = AVPlayerView(frame: view.bounds)
+        playerView.autoresizingMask = [.width, .height]
+        playerView.isHidden = true
+        view.addSubview(playerView)
     }
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -121,12 +154,56 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
         case .snapshot:
             sidebar.removeFromSuperview()
             webView.removeFromSuperview()
+            playerView.removeFromSuperview()
+            playerView.isHidden = true
         case .webView:
             sidebar.removeFromSuperview()
             snapshot.removeFromSuperview()
+            playerView.removeFromSuperview()
+            playerView.isHidden = true
         case .contactSheet:
             webView.removeFromSuperview()
+            playerView.removeFromSuperview()
+            playerView.isHidden = true
+        case .player:
+            sidebar.removeFromSuperview()
+            snapshot.removeFromSuperview()
+            webView.removeFromSuperview()
+            view.addSubview(playerView)
+            playerView.isHidden = false
         }
+    }
+
+    func remuxAndPlay(_ src: URL) throws -> Bool {
+        guard let ffmpeg = Bundle.main.path(forAuxiliaryExecutable: "ffmpeg") else {
+            return false
+        }
+
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp4")
+
+        var args = ["-nostdin", "-i", src.path, "-c:v", "copy", "-c:a", "copy",
+                    "-movflags", "+faststart", tmp.path]
+
+#if DEBUG
+        args.insert(contentsOf: ["-loglevel", "info"], at: 0)
+#else
+        args.insert(contentsOf: ["-loglevel", "error"], at: 0)
+#endif
+
+        do {
+            try runHelper(ffmpeg, args: args)
+        } catch {
+            return false
+        }
+
+        DispatchQueue.main.async {
+            self.setupPreview(.player)
+            self.playerView.player = AVPlayer(url: tmp)
+            self.preferredContentSize = self.snapshotSize
+        }
+        return true
     }
 
     func preparePreviewOfSearchableItem(identifier: String, queryString: String?) async throws {
@@ -168,6 +245,17 @@ class PreviewViewController: NSViewController, QLPreviewingController, NSCollect
         }
         snapshotSize = snapshotter.previewSize
         let videoCodec = snapshotter.videoCodec
+        let audioCodec = snapshotter.audioCodec
+
+        if let vcodec = videoCodec?.lowercased(),
+           ["h264", "hevc", "prores"].contains(vcodec),
+           let acodec = audioCodec?.lowercased(),
+           ["aac", "pcm_s16le", "pcm_s24le", "pcm_f32le", "alac"].contains(acodec),
+           url.pathExtension.lowercased() != "mp4" && url.pathExtension.lowercased() != "mov" {
+            if (try? remuxAndPlay(url)) == true {
+                return
+            }
+        }
 
         // Should we prepare a full-sized (QLPreviewViewStyle.normal) preview for e.g. Finder's QuickLook
         // or a single image (QLPreviewViewStyle.compact) for e.g. Finder's Column view and Get Info panel.

@@ -6,10 +6,30 @@
 	<string>$(TeamIdentifierPrefix)qlvideo</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+        <key>CFBundleVersion</key>
+        <string>$(CURRENT_PROJECT_VERSION)</string>
+        <key>UTExportedTypeDeclarations</key>
+        <array>
+                <dict>
+                        <key>UTTypeIdentifier</key>
+                        <string>public.mpeg-4</string>
+                        <key>UTTypeDescription</key>
+                        <string>MP4 movie</string>
+                        <key>UTTypeConformsTo</key>
+                        <array>
+                                <string>public.movie</string>
+                        </array>
+                        <key>UTTypeTagSpecification</key>
+                        <dict>
+                                <key>public.filename-extension</key>
+                                <array>
+                                        <string>mp4</string>
+                                </array>
+                        </dict>
+                </dict>
+        </array>
+        <key>LSMinimumSystemVersion</key>
+        <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

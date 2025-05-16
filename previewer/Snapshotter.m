@@ -262,6 +262,19 @@ void segv_handler(int signum)
     return @(avcodec_get_name(codecID));
 }
 
+- (NSString*) audioCodec
+{
+    if (audio_stream_idx < 0 || !fmt_ctx)
+        return nil;
+
+    AVStream *s = fmt_ctx->streams[audio_stream_idx];
+    AVCodecParameters *params = s->codecpar;
+    if (!params)
+        return nil;
+    enum AVCodecID codecID = params->codec_id;
+    return @(avcodec_get_name(codecID));
+}
+
 // Gets cover art if available, or nil.
 - (CGImageRef) newCoverArtWithMode:(CoverArtMode)mode
 {
